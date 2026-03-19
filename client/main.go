@@ -48,7 +48,12 @@ func (directNet) ListenUDP(network string, locAddr *net.UDPAddr) (transport.UDPC
 }
 
 func (directNet) ListenTCP(network string, laddr *net.TCPAddr) (transport.TCPListener, error) {
-	return net.ListenTCP(network, laddr)
+	l, err := net.ListenTCP(network, laddr)
+	if err != nil {
+		return nil, err
+	}
+
+	return tcpListener{TCPListener: l}, nil
 }
 
 func (directNet) Dial(network, address string) (net.Conn, error) {
@@ -105,6 +110,14 @@ func (d stdDialer) Dial(network, address string) (net.Conn, error) {
 
 type stdListenConfig struct {
 	*net.ListenConfig
+}
+
+type tcpListener struct {
+	*net.TCPListener
+}
+
+func (l tcpListener) AcceptTCP() (transport.TCPConn, error) {
+	return l.TCPListener.AcceptTCP()
 }
 
 func (lc stdListenConfig) Listen(ctx context.Context, network, address string) (net.Listener, error) {
