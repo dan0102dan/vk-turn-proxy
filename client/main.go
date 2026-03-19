@@ -28,10 +28,92 @@ import (
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 	"github.com/pion/logging"
+	"github.com/pion/transport/v4"
 	"github.com/pion/turn/v5"
 )
 
 type getCredsFunc func(string) (string, string, string, error)
+
+// directNet implements pion/transport.Net without enumerating system interfaces.
+// iSH on iPhone often fails on net.Interfaces()/netlink, but TURN client setup
+// only needs dial/listen/resolve operations.
+type directNet struct{}
+
+func (directNet) ListenPacket(network string, address string) (net.PacketConn, error) {
+	return net.ListenPacket(network, address) //nolint:noctx
+}
+
+func (directNet) ListenUDP(network string, locAddr *net.UDPAddr) (transport.UDPConn, error) {
+	return net.ListenUDP(network, locAddr)
+}
+
+func (directNet) ListenTCP(network string, laddr *net.TCPAddr) (transport.TCPListener, error) {
+	return net.ListenTCP(network, laddr)
+}
+
+func (directNet) Dial(network, address string) (net.Conn, error) {
+	return net.Dial(network, address) //nolint:noctx
+}
+
+func (directNet) DialUDP(network string, laddr, raddr *net.UDPAddr) (transport.UDPConn, error) {
+	return net.DialUDP(network, laddr, raddr)
+}
+
+func (directNet) DialTCP(network string, laddr, raddr *net.TCPAddr) (transport.TCPConn, error) {
+	return net.DialTCP(network, laddr, raddr)
+}
+
+func (directNet) ResolveIPAddr(network, address string) (*net.IPAddr, error) {
+	return net.ResolveIPAddr(network, address)
+}
+
+func (directNet) ResolveUDPAddr(network, address string) (*net.UDPAddr, error) {
+	return net.ResolveUDPAddr(network, address)
+}
+
+func (directNet) ResolveTCPAddr(network, address string) (*net.TCPAddr, error) {
+	return net.ResolveTCPAddr(network, address)
+}
+
+func (directNet) Interfaces() ([]*transport.Interface, error) {
+	return nil, nil
+}
+
+func (directNet) InterfaceByIndex(index int) (*transport.Interface, error) {
+	return nil, fmt.Errorf("%w: index=%d", transport.ErrInterfaceNotFound, index)
+}
+
+func (directNet) InterfaceByName(name string) (*transport.Interface, error) {
+	return nil, fmt.Errorf("%w: %s", transport.ErrInterfaceNotFound, name)
+}
+
+func (directNet) CreateDialer(d *net.Dialer) transport.Dialer {
+	return stdDialer{Dialer: d}
+}
+
+func (directNet) CreateListenConfig(lc *net.ListenConfig) transport.ListenConfig {
+	return stdListenConfig{ListenConfig: lc}
+}
+
+type stdDialer struct {
+	*net.Dialer
+}
+
+func (d stdDialer) Dial(network, address string) (net.Conn, error) {
+	return d.Dialer.Dial(network, address)
+}
+
+type stdListenConfig struct {
+	*net.ListenConfig
+}
+
+func (lc stdListenConfig) Listen(ctx context.Context, network, address string) (net.Listener, error) {
+	return lc.ListenConfig.Listen(ctx, network, address)
+}
+
+func (lc stdListenConfig) ListenPacket(ctx context.Context, network, address string) (net.PacketConn, error) {
+	return lc.ListenConfig.ListenPacket(ctx, network, address)
+}
 
 func getVkCreds(link string) (string, string, string, error) {
 	doRequest := func(data string, url string) (resp map[string]interface{}, err error) {
@@ -650,6 +732,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 		STUNServerAddr:         turnServerAddr,
 		TURNServerAddr:         turnServerAddr,
 		Conn:                   turnConn,
+		Net:                    directNet{},
 		Username:               user,
 		Password:               pass,
 		RequestedAddressFamily: addrFamily,
